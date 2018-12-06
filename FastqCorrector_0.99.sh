@@ -45,16 +45,21 @@ fi
 
 echo -e "\n\e[33mBegin: $(date) "
 
-echo -e '\e[39m- Extracting read IDs from provided IDs file (1/4)...'
-rg -j $(nproc) \> $file | sort -n | uniq | sed 's/>\(.*\)/\t\1\t/g' > rm_ids
-minus=$(cat rm_ids | wc -l)
+echo -e '\e[39m- Extracting read IDs & parsing sequences file (1/4)...'
+ids=$(rg -j $(nproc) \> "$file" | sort -n | uniq | sed 's/>\(.*\)/\^\1;/g')
+minus=$(echo "$ids" | tr ' ' '\n' | wc -l)
+rg -j $(nproc) \> $SS | cut -f1-2 | sed 's/>\(.*\)\t\(.*\)/\2 \1/g' > tmp
 
 
 echo '- Finding corresponding read IDs in Sequences file (2/4)...'
-rg -j $(nproc) -f rm_ids $SS | cut -f1 | uniq | cut -d\> -f2 \
-> tmp && mv tmp rm_ids
+for id in ${ids}
+do
+  rg -j $(nproc) $id tmp >> rm_ids
+done
 
 echo '- IDs found and duplicates ignored (3/4)...'
+
+cut -d';' -f2 rm_ids | uniq > tmp && mv tmp rm_ids
 
 past_frm=$(basename $forward | cut -d{ -f2 | tr -d '.fastq.gz')
 past_rrm=$(basename $reverse | cut -d{ -f2 | tr -d '.fastq.gz')
@@ -71,8 +76,8 @@ echo '- Deleting reads and compressing edited files (4/4)...'
 paste <(zcat V03B_R1_trim_cor.fastq.gz) <(zcat V03B_R2_trim_cor.fastq.gz) | \
 paste - - - - | rg -j $(nproc) -v -f rm_ids | \
 awk -v FS="\t" -v OFS="\t" '{print($1,$3,$5,$7,$2,$4,$6,$8)}' | \
-tee >(cut -f1-4 | tr '\t' '\n' | pigz --best --processes $(nproc) > ${forward}{$(expr $(echo $past_frm) + $(echo $end)).fastq.gz) \
-| cut -f5-8 | tr '\t' '\n' | pigz --best --processes $(nproc) > ${reverse}{$(expr $(echo $past_rrm) + $(echo $end)).fastq.gz
+tee >(cut -f1-4 | tr '\t' '\n' | pigz --best -p $(nproc) > ${forward}{$(expr $(echo $past_frm) + $(echo $end)).fastq.gz) \
+| cut -f5-8 | tr '\t' '\n' | pigz --best -p $(nproc) > ${reverse}{$(expr $(echo $past_rrm) + $(echo $end)).fastq.gz
 
 forward=${forward}{$(expr $(echo $past_frm) + $(echo $end)).fastq.gz
 reverse=${reverse}{$(expr $(echo $past_rrm) + $(echo $end)).fastq.gz
@@ -123,4 +128,3 @@ amos=$(rg "$best" Assemblies | rg "$truebest"| awk -F'\t' '{print $1}' | uniq)
 velvetg fix_$amos -exp_cov $6 -cov_cutoff $7 -amos_file yes
 
 echo -e "\e[32mDone\n"
-
